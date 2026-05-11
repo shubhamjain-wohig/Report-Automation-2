@@ -359,30 +359,32 @@ Executive Summary shape:
 Activities shapes — preserve ORIGINAL task descriptions (DO NOT truncate):
 
 Completed / In Progress activities shape — use this structure:
-• Bold Category Name (from original task, use exact wording)
-  Full original task description (preserve ALL words, do not abbreviate)
-• Bold Next Category
-  Full original task description
+Category Name (from original task, use exact wording)
+Full original task description (preserve ALL words, do not abbreviate)
+Next Category
+Full original task description
 
 Upcoming / To-Do activities shape — same structure:
-• Bold Deliverable Name
-  Full original task description
+Deliverable Name
+Full original task description
 
 FORMAT RULES:
-- Level 1 bullet (•): bold category/module label — use exact task words
-- Level 2 bullet: Include the FULL original task description (no word limit)
+- Each line is one item (no manual bullets or dashes needed)
+- First line of each item: category/module label (will be bolded via API)
+- Following lines: Include the FULL original task description (no word limit)
 - NEVER truncate or shorten task descriptions
-- Include all tasks (no limit on number of bullets)
+- Include all tasks (one per paragraph, separated by newlines)
+- DO NOT include bullet characters (•) or dashes - API will add them
 - If a shape is a title/header (short text like "Weekly Status"), keep original or use project name
 - If a shape doesn't match any category, set "content" to null
 
-EXAMPLE of correct format (preserve full task descriptions):
-• Requirements & Discovery Workshops
-  Conduct Requirements & Discovery Workshops; Finalize Architecture & Solution Design.
-• Web Portal & File Validation
-  Build a secure web portal for uploading/validating engineering data files/templates (Excel/CSV); Implement automated schema detection and file validation.
-• Orchestration Layer
-  Create intelligent orchestration layer; Interpret embedded instructions; Extract customer identifiers; Process default values, cross-column dependencies, formula-based computations...
+EXAMPLE of correct format (preserve full task descriptions - NO bullets, API will add them):
+Requirements & Discovery Workshops
+Conduct Requirements & Discovery Workshops; Finalize Architecture & Solution Design.
+Web Portal & File Validation
+Build a secure web portal for uploading/validating engineering data files/templates (Excel/CSV); Implement automated schema detection and file validation.
+Orchestration Layer
+Create intelligent orchestration layer; Interpret embedded instructions; Extract customer identifiers; Process default values, cross-column dependencies, formula-based computations...
 
 Return ONLY a valid JSON array, no extra text, no markdown:
 [
@@ -479,24 +481,13 @@ Return ONLY a valid JSON array, no extra text, no markdown:
                 }
             })
             
-            # Determine style based on content type
+            template_headers = ["executive summary", "key activities", "completed", "in progress", "upcoming", "period"]
             content_lower = content.lower()
-            # Check if content has bullet point heading (• at start = heading)
-            is_heading_bullet = content.strip().startswith("•")
+            is_template_header = any(h in content_lower for h in template_headers) and len(content) < 40
             
-            # Set font styling based on content type
-            # Montserrat may not be available, fallback to Arial
-            if is_heading_bullet:
-                # Bold heading with bullet
-                font_size = 11
-                font_weight = True  # BOLD
-                font_family = "Montserrat"
-            else:  # Regular content
-                font_size = 11
-                font_weight = False  # NORMAL
-                font_family = "Montserrat"
+            has_multiple_lines = content.count("\n") >= 2
             
-            # Always delete existing text first, then insert new, then style
+            # Always delete existing text first
             if has_text:
                 requests.append({
                     "deleteText": {
@@ -514,31 +505,28 @@ Return ONLY a valid JSON array, no extra text, no markdown:
                 }
             })
             
-            # Skip styling for header/title shapes (keep original template text as-is)
-            # Only style shapes that have content from our generated data
-            template_headers = ["executive summary", "key activities", "completed", "in progress", "upcoming", "period"]
-            content_lower = content.lower()
-            is_template_header = any(h in content_lower for h in template_headers) and len(content) < 40
-            
             if is_template_header:
-                # Skip styling for template headers
                 print(f"[DEBUG] {obj_id}: SKIP styling (template header): '{content[:30]}...'")
             else:
-                # Apply styling to generated content
+                # Apply base style (DM Sans, consistent with other slides)
                 requests.append({
                     "updateTextStyle": {
                         "objectId": obj_id,
                         "textRange": {"type": "ALL"},
                         "style": {
-                            "fontFamily": font_family,
-                            "fontSize": {"magnitude": font_size, "unit": "PT"},
-                            "bold": font_weight,
+                            "fontFamily": "DM Sans",
+                            "fontSize": {"magnitude": 11, "unit": "PT"},
                         },
-                        "fields": "fontFamily,fontSize,bold"
+                        "fields": "fontFamily,fontSize"
                     }
                 })
-                weight_str = "BOLD" if font_weight else "NORMAL"
-                print(f"[DEBUG] {obj_id}: '{content[:30]}...' set to {font_size}pt {weight_str} {font_family}")
+                
+                if has_multiple_lines:
+                    para_requests = _build_bold_category_headers(obj_id, content)
+                    requests.extend(para_requests)
+                    print(f"[DEBUG] {obj_id}: Applied base style + {len(para_requests)} bold ranges for category headers")
+                else:
+                    print(f"[DEBUG] {obj_id}: Applied base style DM Sans 11pt")
         
         if requests:
             slides_svc.presentations().batchUpdate(
@@ -575,6 +563,37 @@ _RETRY_CONFIG = genai_types.GenerateContentConfig(
         ),
     ),
 )
+
+def _build_bold_category_headers(obj_id: str, content: str) -> list:
+    """Bold category headers in activity content - bold lines 0, 2, 4, (the category names)."""
+    requests = []
+    lines = content.split("\n")
+    current_pos = 0
+    
+    for i, line in enumerate(lines):
+        if i == 0:
+            line_start = 0
+        else:
+            line_start = current_pos
+        
+        line_length = len(line)
+        
+        if line_length > 0 and i % 2 == 0:
+            requests.append({
+                "updateTextStyle": {
+                    "objectId": obj_id,
+                    "textRange": {
+                        "startIndex": line_start,
+                        "endIndex": line_start + line_length
+                    },
+                    "style": {"bold": True},
+                    "fields": "bold"
+                }
+            })
+        
+        current_pos = line_start + line_length + 1
+    
+    return requests
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GOOGLE AUTH HELPER
@@ -2540,6 +2559,38 @@ Return ONLY valid JSON:"""
         "{{COMPLETED_ACTIVITIES}}": placeholder_map.get("{{Key Activities Completed}}", "") + "\n\n" + placeholder_map.get("{{Key Activities In Progress}}", ""),
         "{{UPCOMING_ACTIVITIES}}": placeholder_map.get("{{Key Activities Upcoming}}", ""),
     }
+    normalized_alt_text_map = {}
+    for tag, content in alt_text_map.items():
+        normalized_content = str(content or "")
+        if tag in ("{{COMPLETED_ACTIVITIES}}", "{{UPCOMING_ACTIVITIES}}"):
+            cleaned_lines = []
+            for line in normalized_content.splitlines():
+                stripped_line = line.lstrip()
+                stripped_line = re.sub(r"^[•○◦●▪\-]+\s*", "", stripped_line)
+                cleaned_lines.append(stripped_line if line.strip() else "")
+            normalized_content = "\n".join(cleaned_lines)
+        normalized_alt_text_map[tag] = normalized_content
+    formatted_alt_text_map = {}
+    for tag, content in normalized_alt_text_map.items():
+        if tag not in ("{{COMPLETED_ACTIVITIES}}", "{{UPCOMING_ACTIVITIES}}"):
+            formatted_alt_text_map[tag] = str(content or "").strip()
+            continue
+        # Build native nested bullets by using plain headings (level 1)
+        # and tab-indented detail lines (level 2) before createParagraphBullets.
+        formatted_lines = []
+        expect_heading = True
+        for raw_line in str(content or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                expect_heading = True
+                continue
+            if expect_heading:
+                formatted_lines.append(line)
+                expect_heading = False
+            else:
+                formatted_lines.append(f"\t{line}")
+                expect_heading = True
+        formatted_alt_text_map[tag] = "\n".join(formatted_lines)
     print(f"[DEBUG] Alt text map with data: {[(k, len(v)) for k,v in alt_text_map.items()]}")
     
     # Fetch all slides to find shapes by their title (Alt Text)
@@ -2563,8 +2614,12 @@ Return ONLY valid JSON:"""
         
         # Collect update requests for text boxes
         text_update_requests = []
+        style_requests = []
+        bullet_only_requests = []
+        heading_bold_requests = []
+        activity_object_ids = set()
         
-        for tag, content in alt_text_map.items():
+        for tag, content in formatted_alt_text_map.items():
             if not content:
                 continue
             for slide in all_slides:
@@ -2573,7 +2628,16 @@ Return ONLY valid JSON:"""
                     elem_desc = (elem.get("description", "") or "").strip()
                     elem_id = elem.get("objectId", "")
                     
-                    if elem_title == tag or elem_desc == tag:
+                    normalized_tag = re.sub(r"\s+", "", tag).upper()
+                    normalized_title = re.sub(r"\s+", "", elem_title).upper()
+                    normalized_desc = re.sub(r"\s+", "", elem_desc).upper()
+                    tag_matched = (
+                        normalized_title == normalized_tag
+                        or normalized_desc == normalized_tag
+                        or (normalized_tag in normalized_title if normalized_title else False)
+                        or (normalized_tag in normalized_desc if normalized_desc else False)
+                    )
+                    if tag_matched:
                         if "shape" in elem:
                             shape_text = elem.get("shape", {}).get("text", {})
                             has_text = any(
@@ -2594,15 +2658,136 @@ Return ONLY valid JSON:"""
                                     "text": content
                                 }
                             })
+
+                            # Apply DM Sans to inserted content for exact visual parity.
+                            # Executive Summary gets larger font (21pt), others get 16pt.
+                            font_size = 21 if tag == "{{EXECUTIVE_SUMMARY}}" else 16
+                            style_requests.append({
+                                "updateTextStyle": {
+                                    "objectId": elem_id,
+                                    "textRange": {"type": "ALL"},
+                                    "style": {
+                                        "fontFamily": "DM Sans",
+                                        "fontSize": {
+                                            "magnitude": font_size,
+                                            "unit": "PT",
+                                        },
+                                        "bold": False,
+                                    },
+                                    "fields": "fontFamily,fontSize,bold",
+                                }
+                            })
+
+                            # Prepare official Slides bullets (not manual symbols) for activity boxes.
+                            if tag in ("{{COMPLETED_ACTIVITIES}}", "{{UPCOMING_ACTIVITIES}}"):
+                                activity_object_ids.add(elem_id)
+                                bullet_only_requests.append({
+                                    "createParagraphBullets": {
+                                        "objectId": elem_id,
+                                        "textRange": {"type": "ALL"},
+                                        "bulletPreset": "BULLET_DISC_CIRCLE_SQUARE",
+                                    }
+                                })
                             print(f"[DEBUG] Alt Text fill: '{tag}' -> '{content[:30]}...'")
-        
-        # Execute batch updates if we have any
+
+        # Execute text insert/delete first so content always lands.
         if text_update_requests:
-            slides.presentations().batchUpdate(
-                presentationId=slides_id,
-                body={"requests": text_update_requests}
-            ).execute()
-            print(f"[DEBUG] Alt Text updates applied: {len(text_update_requests)} fields")
+            try:
+                slides.presentations().batchUpdate(
+                    presentationId=slides_id,
+                    body={"requests": text_update_requests}
+                ).execute()
+                print(f"[DEBUG] Alt Text updates applied: {len(text_update_requests)} fields")
+            except Exception as batch_exc:
+                print(f"[WARNING] Text insert batch failed: {batch_exc}")
+
+        # Then apply base font style.
+        if style_requests:
+            try:
+                slides.presentations().batchUpdate(
+                    presentationId=slides_id,
+                    body={"requests": style_requests}
+                ).execute()
+                print(f"[DEBUG] Text style applied: {len(style_requests)} fields")
+            except Exception as style_exc:
+                print(f"[WARNING] Base style batch failed: {style_exc}")
+
+        # Apply official Slides bullets in a separate batch to avoid range conflicts.
+        if bullet_only_requests:
+            try:
+                slides.presentations().batchUpdate(
+                    presentationId=slides_id,
+                    body={"requests": bullet_only_requests}
+                ).execute()
+                print(f"[DEBUG] Official bullet formatting applied: {len(bullet_only_requests)} fields")
+            except Exception as bullet_exc:
+                print(f"[WARNING] Bullet formatting batch failed: {bullet_exc}")
+
+        # Finally bold heading lines only (after bullets exist and tabs are normalized by API).
+        if activity_object_ids:
+            print(f"[DEBUG] Activity object IDs to bold: {activity_object_ids}")
+            try:
+                latest_prs = slides.presentations().get(presentationId=slides_id).execute()
+                for slide in latest_prs.get("slides", []):
+                    for elem in slide.get("pageElements", []):
+                        obj_id = elem.get("objectId", "")
+                        if obj_id not in activity_object_ids:
+                            continue
+                        text_content = (
+                            elem.get("shape", {})
+                                .get("text", {})
+                                .get("text", "")
+                        )
+                        text_elements = (
+                            elem.get("shape", {})
+                                .get("text", {})
+                                .get("textElements", [])
+                        )
+                        print(f"[DEBUG] Shape {obj_id} has {len(text_elements)} text elements, content length: {len(text_content)}")
+                        print(f"[DEBUG] Content preview: {text_content[:100]}...")
+                        
+                        for idx, te in enumerate(text_elements):
+                            pm = te.get("paragraphMarker", {})
+                            bullet = pm.get("bullet", {})
+                            if not bullet:
+                                continue
+                            nesting = bullet.get("nestingLevel", "0")
+                            if int(nesting) != 0:
+                                continue
+                            start_idx = te.get("startIndex")
+                            end_idx = te.get("endIndex")
+                            if start_idx is None:
+                                start_idx = 0
+                            if not isinstance(start_idx, int) or not isinstance(end_idx, int):
+                                print(f"[DEBUG] Skipping element {idx}: start={start_idx} (type={type(start_idx)}), end={end_idx} (type={type(end_idx)})")
+                                continue
+                            if end_idx - 1 <= start_idx:
+                                continue
+                            heading_bold_requests.append({
+                                "updateTextStyle": {
+                                    "objectId": obj_id,
+                                    "textRange": {
+                                        "type": "FIXED_RANGE",
+                                        "startIndex": start_idx,
+                                        "endIndex": end_idx - 1,
+                                    },
+                                    "style": {"bold": True},
+                                    "fields": "bold",
+                                }
+                            })
+                            print(f"[DEBUG] Added bold request for element {idx}")
+            except Exception as heading_scan_exc:
+                print(f"[WARNING] Heading scan failed: {heading_scan_exc}")
+
+        if heading_bold_requests:
+            try:
+                slides.presentations().batchUpdate(
+                    presentationId=slides_id,
+                    body={"requests": heading_bold_requests}
+                ).execute()
+                print(f"[DEBUG] Heading bold applied: {len(heading_bold_requests)} ranges")
+            except Exception as bold_exc:
+                print(f"[WARNING] Heading bold batch failed: {bold_exc}")
     except Exception as e:
         print(f"[DEBUG] Alt Text fill error (non-fatal): {e}")
     
@@ -2742,6 +2927,8 @@ def _inject_timeline_image(
                 placeholder_pos = {
                     "translateX": tf.get("translateX", 0),
                     "translateY": tf.get("translateY", 0),
+                    "scaleX":     tf.get("scaleX", 1),
+                    "scaleY":     tf.get("scaleY", 1),
                     "width":      size.get("width",  {}).get("magnitude", SLIDE_W_PX * 9144),
                     "height":     size.get("height", {}).get("magnitude", SLIDE_H_PX * 9144),
                 }
@@ -2761,6 +2948,8 @@ def _inject_timeline_image(
                     placeholder_pos = {
                         "translateX": tf.get("translateX", 0),
                         "translateY": tf.get("translateY", 0),
+                        "scaleX":     tf.get("scaleX", 1),
+                        "scaleY":     tf.get("scaleY", 1),
                         "width":      size.get("width",  {}).get("magnitude", SLIDE_W_PX * 9144),
                         "height":     size.get("height", {}).get("magnitude", SLIDE_H_PX * 9144),
                     }
@@ -2774,15 +2963,30 @@ def _inject_timeline_image(
     # Google Slides uses EMU (English Metric Units): 1 inch = 914400 EMU
     EMU_PER_INCH = 914400
 
-    # Force use full slide (ignore placeholder) - set to center and maximize
-    avail_w_emu = int(SLIDE_W_IN * EMU_PER_INCH * 0.95)
-    avail_h_emu = int(SLIDE_H_IN * EMU_PER_INCH * 0.85)
-    left_emu    = int((SLIDE_W_IN * EMU_PER_INCH - avail_w_emu) // 2)  # Center horizontally
-    top_emu     = int((SLIDE_H_IN * EMU_PER_INCH - avail_h_emu) // 2)   # Center vertically
-    
-    # Use slide 3 (Projected Plan) by default - slides are 0-indexed
-    placeholder_slide_id = slides[2]["objectId"] if len(slides) > 2 else (slides[0]["objectId"] if slides else None)
-    print(f"[DEBUG] Using slide 3 for timeline image: {placeholder_slide_id}")
+    page_size = prs.get("pageSize", {})
+    page_w_emu = page_size.get("width", {}).get("magnitude")
+    page_h_emu = page_size.get("height", {}).get("magnitude")
+    if not page_w_emu or not page_h_emu:
+        page_w_emu = int(SLIDE_W_IN * EMU_PER_INCH)
+        page_h_emu = int(SLIDE_H_IN * EMU_PER_INCH)
+
+    if placeholder_pos:
+        # Use the placeholder's own bounding box (account for scale)
+        scale_x = placeholder_pos.get("scaleX", 1) or 1
+        scale_y = placeholder_pos.get("scaleY", 1) or 1
+        avail_w_emu = int(placeholder_pos["width"] * scale_x)
+        avail_h_emu = int(placeholder_pos["height"] * scale_y)
+        left_emu    = int(placeholder_pos["translateX"])
+        top_emu     = int(placeholder_pos["translateY"])
+        print(f"[DEBUG] Using placeholder bounds for timeline image")
+    else:
+        # No placeholder found — use a centered area on slide 3
+        avail_w_emu = int(page_w_emu * 0.95)
+        avail_h_emu = int(page_h_emu * 0.85)
+        left_emu    = int((page_w_emu - avail_w_emu) // 2)  # Center horizontally
+        top_emu     = int((page_h_emu - avail_h_emu) // 2)   # Center vertically
+        placeholder_slide_id = slides[2]["objectId"] if len(slides) > 2 else (slides[0]["objectId"] if slides else None)
+        print(f"[DEBUG] Using slide 3 for timeline image: {placeholder_slide_id}")
 
     if not placeholder_slide_id:
         raise ValueError("No slides found in the presentation.")
@@ -2790,22 +2994,25 @@ def _inject_timeline_image(
     print(f"[DEBUG] Image original: {img_w_px}x{img_h_px}px")
     print(f"[DEBUG] Available space: {avail_w_emu//914000}x{avail_h_emu//914000} inches")
     
-    # Use full available space (fill the placeholder area)
-    fit_w_emu  = avail_w_emu
-    fit_h_emu  = avail_h_emu
-
+    # Scale image proportionally to fit within available space while maintaining aspect ratio
+    img_aspect = img_w_px / img_h_px if img_h_px > 0 else 1.0
+    avail_aspect = avail_w_emu / avail_h_emu if avail_h_emu > 0 else 1.0
+    
+    if img_aspect > avail_aspect:
+        # Image is wider than available space - fit to width
+        fit_w_emu = avail_w_emu
+        fit_h_emu = int(fit_w_emu / img_aspect)
+    else:
+        # Image is taller than available space - fit to height
+        fit_h_emu = avail_h_emu
+        fit_w_emu = int(fit_h_emu * img_aspect)
+    
     # Centre within the available area
     center_left = left_emu + (avail_w_emu - fit_w_emu) // 2
     center_top  = top_emu  + (avail_h_emu - fit_h_emu) // 2
 
     # ── c. Build batchUpdate requests ────────────────────────────────────
     requests = []
-
-    # Delete the placeholder shape (if found)
-    if placeholder_element_id:
-        requests.append({
-            "deleteObject": {"objectId": placeholder_element_id}
-        })
 
     # Insert the PNG image from Drive
     new_image_id = f"timeline_img_{datetime.now().strftime('%H%M%S%f')}"
@@ -2842,6 +3049,16 @@ def _inject_timeline_image(
     ).execute()
     
     print(f"[DEBUG] Image create result: {result}")
+
+    # Delete the placeholder shape after image insertion
+    if placeholder_element_id:
+        try:
+            slides_svc.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={"requests": [{"deleteObject": {"objectId": placeholder_element_id}}]},
+            ).execute()
+        except Exception as delete_exc:
+            print(f"[WARNING] Placeholder delete failed: {delete_exc}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

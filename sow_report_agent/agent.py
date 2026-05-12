@@ -205,25 +205,41 @@ def _load_google_credentials():
             )
         creds = None
         if oauth_token_path and os.path.exists(oauth_token_path):
-            creds = UserCredentials.from_authorized_user_file(oauth_token_path, GOOGLE_SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
+            try:
+                creds = UserCredentials.from_authorized_user_file(oauth_token_path, GOOGLE_SCOPES)
+            except Exception:
+                creds = None
+        
+        needs_reauth = False
+        if creds and creds.expired and creds.refresh_token:
+            try:
                 creds.refresh(Request())
+            except Exception:
+                needs_reauth = True
+        elif not creds or not creds.valid:
+            needs_reauth = True
+        
+        if needs_reauth:
+            if os.path.exists(oauth_token_path):
+                try:
+                    os.remove(oauth_token_path)
+                except Exception:
+                    pass
+            flow = InstalledAppFlow.from_client_secrets_file(
+                oauth_secret_path, GOOGLE_SCOPES
+            )
+            if GOOGLE_OAUTH_AUTH_MODE == "console":
+                creds = flow.run_console()
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    oauth_secret_path, GOOGLE_SCOPES
-                )
-                if GOOGLE_OAUTH_AUTH_MODE == "console":
+                try:
+                    creds = flow.run_local_server(port=0)
+                except Exception:
                     creds = flow.run_console()
-                else:
-                    try:
-                        creds = flow.run_local_server(port=0)
-                    except Exception:
-                        creds = flow.run_console()
-            if oauth_token_path:
-                os.makedirs(os.path.dirname(oauth_token_path) or ".", exist_ok=True)
-                with open(oauth_token_path, "w", encoding="utf-8") as f:
-                    f.write(creds.to_json())
+        
+        if oauth_token_path and creds:
+            os.makedirs(os.path.dirname(oauth_token_path) or ".", exist_ok=True)
+            with open(oauth_token_path, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
         return creds
 
     json_path = GOOGLE_SHEETS_CREDENTIALS_JSON

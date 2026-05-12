@@ -2660,7 +2660,7 @@ Return ONLY valid JSON:"""
                             })
 
                             # Apply DM Sans to inserted content for exact visual parity.
-                            # Executive Summary gets larger font (21pt), others get 16pt.
+                            # Executive summary uses 21pt, others use 16pt
                             font_size = 21 if tag == "{{EXECUTIVE_SUMMARY}}" else 16
                             style_requests.append({
                                 "updateTextStyle": {

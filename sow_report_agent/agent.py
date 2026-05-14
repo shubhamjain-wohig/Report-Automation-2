@@ -177,13 +177,7 @@ def _summarize_subtasks(task: dict) -> str:
     parts = [p.strip("• -\t") for p in re.split(r"\s*\|\s*|\n+", raw) if p.strip()]
     if not parts:
         return ""
-    if len(parts) == 1:
-        text = parts[0]
-        return text if len(text) <= 180 else (text[:177] + "...")
-    first  = parts[0]
-    second = parts[1]
-    summary = f"{first}. {second}" if not first.endswith((".", "!", "?")) else f"{first} {second}"
-    return summary if len(summary) <= 220 else (summary[:217] + "...")
+    return " | ".join(parts)
 
 
 def _resolve_google_path(path_value: str) -> str:
@@ -452,7 +446,7 @@ def save_tasks_data(tasks_data_json: str, *, tool_context: ToolContext) -> dict:
                 groups[key] = dict(t)
             else:
                 combined = f"{groups[key]['task_detail']} | {t['task_detail']}"
-                groups[key]["task_detail"] = combined[:500]
+                groups[key]["task_detail"] = combined
         tasks = list(groups.values())
 
         if len(tasks) > MAX_TASKS:
@@ -464,7 +458,7 @@ def save_tasks_data(tasks_data_json: str, *, tool_context: ToolContext) -> dict:
                     pg[p]["module"] = p.split(":")[-1].strip() if ":" in p else p
                 else:
                     combined = f"{pg[p]['task_detail']} | {t['task_detail']}"
-                    pg[p]["task_detail"] = combined[:500]
+                    pg[p]["task_detail"] = combined
                     if t["end_date"] > pg[p]["end_date"]:
                         pg[p]["end_date"] = t["end_date"]
             tasks = list(pg.values())
